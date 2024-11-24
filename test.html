@@ -1,0 +1,245 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <title>最適経路の選択と回避地点考慮</title>
+    <script src="https://maps.googleapis.com/maps/api/js?key=AIzaSyBpFI9A_apWaxmmO6cAWa3YN6kPr6q8Wms&libraries=geometry,places&callback=initMap" async defer></script>
+    <style>
+        html, body { height: 100%; margin: 0; font-family: Arial, sans-serif; }
+        #map { height: 100%; }
+        
+        /* route-options を画面左下に配置 */
+        #route-options {
+            position: fixed; /* 画面に固定 */
+            bottom: 20px;    /* 下から20px */
+            left: 20px;      /* 左から20px */
+            background: white;
+            padding: 20px;
+            border-radius: 5px;
+            box-shadow: 0 2px 6px rgba(0,0,0,0.3);
+            z-index: 5;
+            width: 300px;    /* 幅を広げて視認性を向上 */
+        }
+        
+        #route-options button {
+            width: 100%;
+            padding: 15px;
+            font-size: 16px;  /* フォントサイズを大きく */
+            background-color: #00af3a;
+            color: white;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            margin: 5px 0;
+            text-align: center; /* 中央寄せ */
+        }
+        #route-options button:hover {
+            background-color: #007f1a;
+        }
+        
+        #searchBox {
+            position: absolute;
+            top: 50px;
+            left: 10px;
+            background-color: white;
+            padding: 20px;
+            border-radius: 5px;
+            box-shadow: 0 2px 6px rgba(0,0,0,0.3);
+            z-index: 10;
+            width: 300px;  /* 幅を広げる */
+        }
+        #searchBox input {
+            width: 90%; /* 入力フィールドの幅を少し小さくする */
+            padding: 10px;
+            font-size: 16px;
+            margin-bottom: 10px;
+            border: 1px solid #ccc;
+            border-radius: 5px;
+            display: block; /* ブロック表示で右側に余白が残る */
+            margin-right: auto; /* 右に余白を作成 */
+        }
+        #searchBox button {
+            width: 100%;
+            padding: 10px;
+            font-size: 14px;
+            background-color: #00af3a;
+            color: white;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+        }
+        #searchBox button:hover {
+            background-color: #007f1a;
+        }
+    </style>
+</head>
+<body>
+    <div id="searchBox">
+        <input id="startInput" type="text" placeholder="出発地点を入力" />
+        <input id="endInput" type="text" placeholder="到着地点を入力" />
+        <button onclick="geocodeAndSetRoute()">経路検索</button>
+    </div>
+    <div id="route-options">Loading...</div>
+    <div id="map"></div>
+
+    <script>
+        let directionsService;
+        let map;
+        let geocoder;
+        let markerStart, markerEnd;
+        let avoidLocations = [];
+        const AVOID_RADIUS = 50;
+
+        function initMap() {
+            directionsService = new google.maps.DirectionsService();
+            geocoder = new google.maps.Geocoder();
+
+            map = new google.maps.Map(document.getElementById("map"), {
+                zoom: 14,
+                center: { lat: 35.9071966, lng: 139.4827494 } // 東京
+            });
+
+            // 事故現場の例としてGeoJSONデータの読み込み
+            map.data.loadGeoJson('honhyo_2023.geojson', null, (features) => {
+                features.forEach((feature) => {
+                    const location = feature.getGeometry().get();
+                    avoidLocations.push(location);
+                });
+
+                // ピンを非表示
+                map.data.setStyle({ visible: false });
+            });
+        }
+
+        function geocodeAndSetRoute() {
+            const startAddress = document.getElementById("startInput").value;
+            const endAddress = document.getElementById("endInput").value;
+
+            geocoder.geocode({ address: startAddress }, (results, status) => {
+                if (status === "OK") {
+                    const startLocation = results[0].geometry.location;
+                    if (markerStart) {
+                        markerStart.setMap(null); // 古いマーカーを削除
+                    }
+                    markerStart = new google.maps.Marker({
+                        map: map,
+                        position: startLocation,
+                        title: startAddress
+                    });
+
+                    geocoder.geocode({ address: endAddress }, (results, status) => {
+                        if (status === "OK") {
+                            const endLocation = results[0].geometry.location;
+                            if (markerEnd) {
+                                markerEnd.setMap(null); // 古いマーカーを削除
+                            }
+                            markerEnd = new google.maps.Marker({
+                                map: map,
+                                position: endLocation,
+                                title: endAddress
+                            });
+
+                            // 経路検索
+                            setRoute(startLocation, endLocation);
+                            map.setCenter(startLocation);
+                            map.setZoom(14);
+                        } else {
+                            alert("到着地点の検索に失敗しました: " + status);
+                        }
+                    });
+                } else {
+                    alert("出発地点の検索に失敗しました: " + status);
+                }
+            });
+        }
+
+        function setRoute(startLocation, endLocation) {
+            const routeOptions = {
+                origin: startLocation,
+                destination: endLocation,
+                travelMode: google.maps.TravelMode.WALKING, // 歩行モード
+                waypoints: [], // 経由地なし
+                provideRouteAlternatives: true  // 複数ルートを提供
+            };
+
+            directionsService.route(routeOptions, (response, status) => {
+                if (status === google.maps.DirectionsStatus.OK) {
+                    findAndDisplayBestRoute(response);
+                } else {
+                    console.error("ルート計算に失敗しました:", status);
+                    alert("ルート計算ができませんでした。");
+                }
+            });
+        }
+
+        function findAndDisplayBestRoute(response) {
+            const routesInfo = [];
+            const renderers = []; // 各ルート用のDirectionsRenderer
+
+            response.routes.forEach((route, index) => {
+                const avoidCount = countAvoidPoints(route);
+
+                routesInfo.push({
+                    index,
+                    avoidCount,
+                    duration: route.legs[0].duration.text,
+                });
+
+                // 各ルートを別々のDirectionsRendererで描画
+                const renderer = new google.maps.DirectionsRenderer({
+                    map: map,
+                    directions: response,
+                    routeIndex: index, // このルートのインデックス
+                    suppressMarkers: false, // デフォルトのマーカーを表示
+                });
+                renderers.push(renderer);
+            });
+
+            displayRouteOptions(routesInfo, response, renderers);
+        }
+
+        function countAvoidPoints(route) {
+            let avoidCount = 0;
+            const steps = route.legs[0].steps;
+
+            steps.forEach((step) => {
+                const stepStart = step.start_location;
+                const stepEnd = step.end_location;
+
+                const startClose = avoidLocations.some((avoid) =>
+                    google.maps.geometry.spherical.computeDistanceBetween(stepStart, avoid) < AVOID_RADIUS
+                );
+
+                const endClose = avoidLocations.some((avoid) =>
+                    google.maps.geometry.spherical.computeDistanceBetween(stepEnd, avoid) < AVOID_RADIUS
+                );
+
+                if (startClose || endClose) {
+                    avoidCount++;
+                }
+            });
+
+            return avoidCount;
+        }
+
+        function displayRouteOptions(routesInfo, response, renderers) {
+            const routeOptionsDiv = document.getElementById("route-options");
+            routeOptionsDiv.innerHTML = "";
+
+            routesInfo.forEach((info) => {
+                const button = document.createElement("button");
+                // 改行を追加
+                button.innerHTML = `ルート${info.index + 1}:事故現場を通過する回数 ${info.avoidCount}<br>時間 ${info.duration}`;
+                button.style.margin = "5px";
+                button.onclick = () => {
+                    // 他のルートを非表示にする
+                    renderers.forEach((renderer, i) => {
+                        renderer.setMap(i === info.index ? map : null);
+                    });
+                };
+                routeOptionsDiv.appendChild(button);
+            });
+        }
+    </script>
+</body>
+</html>
