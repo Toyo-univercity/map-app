@@ -1,17 +1,15 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <meta charset="UTF-8">
+    <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>交通事故減少のための地図アプリ</title>
-    <!-- PWA設定 -->
-    <link rel="manifest" href="manifest.json">
 </head>
 <body>
     <h1>交通事故減少のための地図アプリ</h1>
 
     <form id="searchForm">
-        <button class="large-button" onclick="location.href='test.html'">埼玉県</button>
+        <button class="large-button" onclick="location.href=' test.html'">埼玉県</button>
     </form>
 
     <ul id="resultList"></ul>
@@ -39,23 +37,7 @@
             displayResults(results);
         });
     </script> 
-
-    <!-- サービスワーカーの登録コードをここに追加 -->
-    <script>
-        if ('serviceWorker' in navigator) {
-            window.addEventListener('load', () => {
-                navigator.serviceWorker.register('service-worker.js')
-                    .then((registration) => {
-                        console.log('Service Workerの登録に成功しました:', registration);
-                    })
-                    .catch((error) => {
-                        console.log('Service Workerの登録に失敗しました:', error);
-                    });
-            });
-        }
-    </script> 
 </body>
-
 <style type="text/css">
     h1 {
         font-size: 30px;
@@ -83,3 +65,4 @@
     }
 </style>
 </html>
+
